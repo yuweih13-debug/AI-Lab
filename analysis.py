@@ -1,422 +1,257 @@
-# =============================================================================
-# PHASE 1 - SCRAPE
-# Prompt: "Write a BeautifulSoup scraper to extract the firm profiles table
-# from the URL. Target the <strong> tag for firm names and isolate header row."
-# =============================================================================
+# ============================================================
+# BANA290 - Assignment 1: AI Lab
+# North American Fintech & Financial Services Directory
+# ============================================================
 
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import numpy as np
-import re
-import warnings
-import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import statsmodels.api as sm
+import statsmodels.formula.api as smf
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import NearestNeighbors
-from scipy import stats
 
-warnings.filterwarnings('ignore')
+# ============================================================
+# PHASE 1: SCRAPE
+# Prompt: Scrape the HTML table from the fintech directory URL,
+# extract firm names from <strong> tags, and build a DataFrame
+# ============================================================
 
-URL = "https://bana290-assignment1.netlify.app/"
-
-response = requests.get(URL)
+url = "https://bana290-assignment1.netlify.app/"
+response = requests.get(url)
 soup = BeautifulSoup(response.text, "html.parser")
 
 table = soup.find("table")
 rows = table.find_all("tr")
 
-# Extract headers from the first row
-header_row = rows[0]
-headers = [th.get_text(strip=True) for th in header_row.find_all(["th", "td"])]
-print("Headers:", headers)
+# Extract headers from first row
+headers = [th.get_text(strip=True) for th in rows[0].find_all(["th", "td"])]
 
-# Extract data rows
+# Extract data rows, targeting <strong> tag for firm name
 data = []
 for row in rows[1:]:
-      cells = row.find_all(["td", "th"])
-      if not cells:
-                continue
-            row_data = []
+    cells = row.find_all("td")
+    if not cells:
+        continue
+    row_data = []
     for i, cell in enumerate(cells):
-              # For the first column (firm name), target <strong> tag
-              if i == 0:
-                            strong = cell.find("strong")
-                            text = strong.get_text(strip=True) if strong else cell.get_text(strip=True)
-else:
-            text = cell.get_text(strip=True)
-          row_data.append(text)
+        if i == 0:
+            strong = cell.find("strong")
+            row_data.append(strong.get_text(strip=True) if strong else cell.get_text(strip=True))
+        else:
+            row_data.append(cell.get_text(strip=True))
     data.append(row_data)
 
-df_raw = pd.DataFrame(data, columns=headers)
-print(f"Scraped {len(df_raw)} rows")
-print(df_raw.head())
-
-# Save raw scraped data
-df_raw.to_csv("raw_data.csv", index=False)
+df = pd.DataFrame(data, columns=headers)
+print(f"Scraped {len(df)} rows")
+print(df.head(3))
 
 
-# =============================================================================
-# PHASE 2 - CLEAN
-# Prompt: "Clean the scraped fintech data: convert ANNUAL_REV strings to floats,
-# handle missing values in AI_STATUS and RD_SPEND, standardize categorical
-# labels to binary AI_ADOPTED, and drop rows missing Rev Growth."
-# =============================================================================
+# ============================================================
+# PHASE 2: CLEAN
+# Prompt: Standardize all messy columns including ANNUAL_REV,
+# REV_GROWTH, RD_SPEND, AI_STATUS, TEAM_SIZE, CUSTOMER_ACCTS
+# ============================================================
 
-df = df_raw.copy()
+# --- Helper: parse revenue/spend strings to float ---
+def parse_money(val):
+    if pd.isna(val):
+        return np.nan
+    s = str(val).lower().strip()
+    s = s.replace("usd", "").replace("$", "").replace(",", "").strip()
+    if s in ["--", "n/a", "", "unknown", "-"]:
+        return np.nan
+    try:
+        if "billion" in s or "bn" in s:
+            s = s.replace("billion", "").replace("bn", "").strip()
+            return float(s) * 1_000_000_000
+        elif "million" in s or "mn" in s or s.endswith("m"):
+            s = s.replace("million", "").replace("mn", "").replace("m", "").strip()
+            return float(s) * 1_000_000
+        elif "k" in s:
+            s = s.replace("k", "").strip()
+            return float(s) * 1_000
+        else:
+            return float(s)
+    except:
+        return np.nan
 
-# Rename columns for convenience
-df.columns = [
-      "FIRM", "SEGMENT", "HQ_REGION", "FOUNDED", "TEAM_SIZE",
-      "ANNUAL_REV", "REV_GROWTH", "RD_SPEND", "AI_STATUS",
-      "CLOUD_STACK", "DIGITAL_SALES", "COMPLIANCE_TIER",
-      "FRAUD_EXPOSURE", "FUNDING_STAGE", "CUSTOMER_ACCTS"
-]
+# --- Helper: parse percentage strings to float ---
+def parse_pct(val):
+    if pd.isna(val):
+        return np.nan
+    s = str(val).strip()
+    if s in ["--", "N/A", "", "Unknown", "-"]:
+        return np.nan
+    s = s.replace("+", "").replace("%", "").strip()
+    try:
+        return float(s)
+    except:
+        return np.nan
 
 # --- Clean ANNUAL_REV ---
-def parse_revenue(val):
-      if pd.isna(val) or str(val).strip() == '':
-                return np.nan
-            v = str(val).lower().strip()
-    v = v.replace('$', '').replace(',', '').replace('usd', '').strip()
-    # Handle K notation
-    if 'k' in v and not any(x in v for x in ['million', 'mn', 'billion', 'bn']):
-              v_clean = v.replace('k', '').strip()
-              try:
-                            return float(v_clean) * 1_000
-                        except:
-            return np.nan
-    # Handle millions
-    multiplier = 1
-    if any(x in v for x in ['million', ' mn', 'mn ', '.mn', 'm ']):
-              multiplier = 1_000_000
-              for x in ['million', ' mn', 'mn ', '.mn', 'm ']:
-                            v = v.replace(x, '')
-    elif v.endswith('m') and not v.endswith('mn'):
-        multiplier = 1_000_000
-        v = v[:-1]
-elif v.endswith('mn'):
-        multiplier = 1_000_000
-        v = v[:-2]
-    v = v.strip()
-    try:
-              return float(v) * multiplier
-          except:
-        return np.nan
-
-            df['ANNUAL_REV'] = df['ANNUAL_REV'].apply(parse_revenue)
-
-# --- Clean TEAM_SIZE ---
-def parse_team_size(val):
-      if pd.isna(val):
-                return np.nan
-            v = str(val).lower().replace('k', '000').replace(',', '').strip()
-    try:
-              return float(v)
-          except:
-        return np.nan
-
-df['TEAM_SIZE'] = df['TEAM_SIZE'].apply(parse_team_size)
-
-# --- Clean FOUNDED ---
-df['FOUNDED'] = pd.to_numeric(df['FOUNDED'], errors='coerce')
+df["ANNUAL_REV"] = df["Annual Rev."].apply(parse_money)
 
 # --- Clean REV_GROWTH ---
-def parse_growth(val):
-      if pd.isna(val) or str(val).strip() in ['', '--', '-', 'N/A', 'Unknown']:
-                return np.nan
-            v = str(val).strip().replace('%', '').replace('+', '').strip()
-    try:
-              return float(v)
-          except:
+df["REV_GROWTH"] = df["Rev Growth (YoY)"].apply(parse_pct)
+
+# --- Clean TEAM_SIZE ---
+def parse_team(val):
+    if pd.isna(val):
         return np.nan
-
-df['REV_GROWTH'] = df['REV_GROWTH'].apply(parse_growth)
-
-# --- Clean RD_SPEND ---
-def parse_rd_spend(val):
-      if pd.isna(val):
-                return np.nan
-            v = str(val).strip()
-    # Replace missing value strings
-    if v in ['--', '-', 'N/A', 'Unknown', '', ' ']:
-              return np.nan
-          # Check for percentage of revenue notation
-          if '% rev' in v.lower() or '%rev' in v.lower():
-                    return np.nan  # cannot convert without revenue context here; handle below
-    vl = v.lower().replace('$', '').replace(',', '').replace('usd', '').strip()
-    multiplier = 1
-    if any(x in vl for x in ['million', ' mn', 'mn']):
-              multiplier = 1_000_000
-              for x in ['million', ' mn', 'mn']:
-                            vl = vl.replace(x, '')
-    elif vl.endswith('m'):
-        multiplier = 1_000_000
-        vl = vl[:-1]
-    vl = vl.strip()
+    s = str(val).lower().replace(",", "").strip()
+    if "k" in s:
+        return float(s.replace("k", "").strip()) * 1000
     try:
-              return float(vl) * multiplier
-          except:
-        return np.nan
-
-# For % rev entries, calculate from annual revenue
-def parse_rd_spend_pct(val, rev):
-      if pd.isna(val):
-                return np.nan
-            v = str(val).strip()
-    if '% rev' in v.lower() or '%rev' in v.lower():
-              pct_str = v.lower().replace('% rev', '').replace('%rev', '').strip()
-              try:
-                            pct = float(pct_str) / 100
-                            return pct * rev if not pd.isna(rev) else np.nan
-                        except:
-            return np.nan
-    return parse_rd_spend(val)
-
-df['RD_SPEND'] = df.apply(
-      lambda row: parse_rd_spend_pct(row['RD_SPEND'], row['ANNUAL_REV']), axis=1
-)
-
-# --- Standardize AI_STATUS to binary AI_ADOPTED ---
-# Replace missing-value strings first
-missing_vals = ['--', '-', 'N/A', 'Unknown', '', ' ']
-df['AI_STATUS'] = df['AI_STATUS'].replace(missing_vals, np.nan)
-
-adopted_labels = {
-      'yes': 1, 'adopted': 1, 'ai enabled': 1, 'live': 1,
-      'production': 1, 'ai-enabled': 1, 'enabled': 1
-}
-not_adopted_labels = {
-      'no': 0, 'not yet': 0, 'manual only': 0, 'legacy only': 0,
-      'none': 0, 'n/a': 0
-}
-
-def map_ai(val):
-      if pd.isna(val):
-                return np.nan
-            v = str(val).strip().lower()
-    if v in adopted_labels:
-              return 1
-    if v in not_adopted_labels:
-              return 0
-    # Partial / pilot / in review -> treat as not fully adopted
-    if v in ['pilot', 'in review']:
-              return 0
-    return np.nan
-
-df['AI_ADOPTED'] = df['AI_STATUS'].apply(map_ai)
-
-# --- Clean DIGITAL_SALES ---
-def parse_pct(val):
-      if pd.isna(val):
-                return np.nan
-            v = str(val).strip().replace('%', '').replace('+', '')
-    try:
-              return float(v)
+        return float(s)
     except:
         return np.nan
 
-df['DIGITAL_SALES'] = df['DIGITAL_SALES'].apply(parse_pct)
+df["TEAM_SIZE"] = df["Team Size"].apply(parse_team)
 
 # --- Clean CUSTOMER_ACCTS ---
-def parse_accounts(val):
-      if pd.isna(val):
-                return np.nan
-            v = str(val).lower().replace(',', '').replace(' ', '').strip()
-    multiplier = 1
-    if v.endswith('k'):
-              multiplier = 1_000
-        v = v[:-1]
-elif v.endswith('m'):
-        multiplier = 1_000_000
-        v = v[:-1]
+def parse_accts(val):
+    if pd.isna(val):
+        return np.nan
+    s = str(val).lower().replace(",", "").strip()
+    if "m" in s:
+        return float(s.replace("m", "").strip()) * 1_000_000
+    elif "k" in s:
+        return float(s.replace("k", "").strip()) * 1_000
     try:
-              return float(v) * multiplier
+        return float(s)
     except:
         return np.nan
 
-df['CUSTOMER_ACCTS'] = df['CUSTOMER_ACCTS'].apply(parse_accounts)
+df["CUSTOMER_ACCTS"] = df["Customer Accts"].apply(parse_accts)
 
-# Drop rows with missing outcome variable (REV_GROWTH) or treatment (AI_ADOPTED)
-df.dropna(subset=['REV_GROWTH', 'AI_ADOPTED'], inplace=True)
+# --- Clean RD_SPEND (handle % rev notation separately) ---
+def parse_rd(row):
+    val = str(row["R&D Spend"]).strip()
+    if val in ["--", "N/A", "", "Unknown", "-"]:
+        return np.nan
+    if "% rev" in val.lower() or "%rev" in val.lower():
+        pct_str = val.lower().replace("% rev", "").replace("%rev", "").strip()
+        try:
+            pct = float(pct_str) / 100
+            return pct * row["ANNUAL_REV"]
+        except:
+            return np.nan
+    return parse_money(val)
 
-print(f"\nCleaned dataset: {len(df)} rows")
-print(df[['FIRM', 'ANNUAL_REV', 'REV_GROWTH', 'RD_SPEND', 'AI_ADOPTED']].head(10))
+df["RD_SPEND"] = df.apply(parse_rd, axis=1)
 
-df.to_csv("clean_data.csv", index=False)
+# --- Clean AI_STATUS to binary (AI_ADOPTED) ---
+ai_positive = ["yes", "adopted", "ai enabled", "live", "production"]
+
+def parse_ai(val):
+    if pd.isna(val):
+        return np.nan
+    s = str(val).lower().strip()
+    if s in ["--", "n/a", "", "unknown", "-"]:
+        return np.nan
+    return 1 if s in ai_positive else 0
+
+df["AI_ADOPTED"] = df["AI Program"].apply(parse_ai)
+
+# --- Drop rows missing critical outcome or treatment variable ---
+df.dropna(subset=["REV_GROWTH", "AI_ADOPTED"], inplace=True)
+print(f"\nAfter dropping incomplete rows: {len(df)} rows remain")
+print(df[["Firm", "ANNUAL_REV", "REV_GROWTH", "RD_SPEND", "AI_ADOPTED", "TEAM_SIZE"]].head(5))
 
 
-# =============================================================================
-# PHASE 3 - ANALYZE
-# Prompt: "Run an OLS regression of REV_GROWTH on AI_ADOPTED, then perform
-# propensity score matching with logistic regression. Plot common support and
-# compute SMD before and after matching."
-# =============================================================================
+# ============================================================
+# PHASE 3: ANALYZE
+# Prompt: Run OLS baseline regression, then apply Propensity
+# Score Matching (PSM) with logistic regression and nearest
+# neighbor matching. Check common support and SMD balance.
+# ============================================================
 
-# Select covariates for propensity score model
-covariates = ['ANNUAL_REV', 'FOUNDED', 'TEAM_SIZE', 'RD_SPEND', 'DIGITAL_SALES']
-
-df_analysis = df[['REV_GROWTH', 'AI_ADOPTED'] + covariates].copy()
-df_analysis.dropna(inplace=True)
-
-print(f"\nAnalysis dataset: {len(df_analysis)} rows")
-print(f"AI Adopters: {df_analysis['AI_ADOPTED'].sum():.0f}, Non-Adopters: {(1-df_analysis['AI_ADOPTED']).sum():.0f}")
-
-# --- Baseline OLS ---
-X_ols = sm.add_constant(df_analysis['AI_ADOPTED'])
-y_ols = df_analysis['REV_GROWTH']
-ols_model = sm.OLS(y_ols, X_ols).fit()
-baseline_coef = ols_model.params['AI_ADOPTED']
-print(f"\nBaseline OLS coefficient on AI_ADOPTED: {baseline_coef:.4f}")
+# --- 3a: Baseline OLS regression ---
+ols_model = smf.ols("REV_GROWTH ~ AI_ADOPTED", data=df).fit()
+baseline_coef = ols_model.params["AI_ADOPTED"]
+print(f"\n--- Baseline OLS Coefficient for AI_ADOPTED: {baseline_coef:.4f} ---")
 print(ols_model.summary())
 
-# --- Propensity Score Estimation ---
-X_ps = df_analysis[covariates].copy()
-# Standardize covariates
-X_ps_std = (X_ps - X_ps.mean()) / X_ps.std()
+# --- Prepare covariates for PSM (drop rows missing covariates) ---
+covariates = ["ANNUAL_REV", "TEAM_SIZE", "RD_SPEND"]
+df_psm = df.dropna(subset=covariates + ["AI_ADOPTED", "REV_GROWTH"]).copy()
+df_psm = df_psm.reset_index(drop=True)
 
-lr = LogisticRegression(max_iter=1000, random_state=42)
-lr.fit(X_ps_std, df_analysis['AI_ADOPTED'])
-df_analysis['PSCORE'] = lr.predict_proba(X_ps_std)[:, 1]
+X = df_psm[covariates].values
+y = df_psm["AI_ADOPTED"].values
 
-# --- Assumption 1: Common Support Plot ---
-treated = df_analysis[df_analysis['AI_ADOPTED'] == 1]['PSCORE']
-control = df_analysis[df_analysis['AI_ADOPTED'] == 0]['PSCORE']
+# --- 3b: Estimate propensity scores via logistic regression ---
+lr = LogisticRegression(max_iter=1000)
+lr.fit(X, y)
+df_psm["PROPENSITY_SCORE"] = lr.predict_proba(X)[:, 1]
 
+# --- Common Support: Plot propensity score distributions ---
 fig, ax = plt.subplots(figsize=(8, 5))
-ax.hist(treated, bins=20, alpha=0.6, label='AI Adopters (Treated)', color='steelblue', density=True)
-ax.hist(control, bins=20, alpha=0.6, label='Non-Adopters (Control)', color='tomato', density=True)
-ax.set_xlabel('Propensity Score', fontsize=12)
-ax.set_ylabel('Density', fontsize=12)
-ax.set_title('Common Support: Propensity Score Distributions', fontsize=13)
+ax.hist(df_psm.loc[df_psm["AI_ADOPTED"] == 1, "PROPENSITY_SCORE"],
+        bins=20, alpha=0.6, label="AI Adopted (Treated)", color="steelblue")
+ax.hist(df_psm.loc[df_psm["AI_ADOPTED"] == 0, "PROPENSITY_SCORE"],
+        bins=20, alpha=0.6, label="No AI (Control)", color="tomato")
+ax.set_xlabel("Propensity Score")
+ax.set_ylabel("Count")
+ax.set_title("Common Support: Propensity Score Distribution by Group")
 ax.legend()
 plt.tight_layout()
-plt.savefig('common_support.png', dpi=150)
-plt.close()
-print("\nCommon support plot saved.")
+plt.savefig("propensity_scores.png", dpi=150)
+plt.show()
+print("Saved: propensity_scores.png")
 
-# --- Assumption 2: SMD Before Matching ---
-def compute_smd(treated_vals, control_vals):
-      mean_diff = treated_vals.mean() - control_vals.mean()
-    pooled_std = np.sqrt((treated_vals.std()**2 + control_vals.std()**2) / 2)
-    return mean_diff / pooled_std if pooled_std > 0 else 0
+# --- 3c: SMD before matching ---
+def compute_smd(treated, control):
+    mean_diff = treated.mean() - control.mean()
+    pooled_std = np.sqrt((treated.std()**2 + control.std()**2) / 2)
+    return mean_diff / pooled_std if pooled_std != 0 else 0
 
-smd_before = {}
+treated = df_psm[df_psm["AI_ADOPTED"] == 1]
+control = df_psm[df_psm["AI_ADOPTED"] == 0]
+
+print("\n--- SMD Before Matching ---")
 for cov in covariates:
-      t_vals = df_analysis.loc[df_analysis['AI_ADOPTED'] == 1, cov]
-    c_vals = df_analysis.loc[df_analysis['AI_ADOPTED'] == 0, cov]
-    smd_before[cov] = compute_smd(t_vals, c_vals)
+    smd = compute_smd(treated[cov], control[cov])
+    print(f"  {cov}: SMD = {smd:.4f}")
 
-print("\nSMD Before Matching:")
-for k, v in smd_before.items():
-      print(f"  {k}: {v:.4f}")
-
-# --- PSM: Nearest-Neighbor Matching ---
-treated_df = df_analysis[df_analysis['AI_ADOPTED'] == 1].copy()
-control_df = df_analysis[df_analysis['AI_ADOPTED'] == 0].copy()
-
+# --- 3d: Nearest-Neighbor Matching (1:1 without replacement) ---
 nn = NearestNeighbors(n_neighbors=1)
-nn.fit(control_df[['PSCORE']])
-distances, indices = nn.kneighbors(treated_df[['PSCORE']])
+nn.fit(control[["PROPENSITY_SCORE"]])
+distances, indices = nn.kneighbors(treated[["PROPENSITY_SCORE"]])
 
-matched_control_idx = control_df.iloc[indices.flatten()].index
-matched_control = control_df.loc[matched_control_idx].copy()
-matched_treated = treated_df.copy()
+matched_control = control.iloc[indices.flatten()].copy()
+matched_treated = treated.copy()
 
-matched_df = pd.concat([matched_treated, matched_control])
-print(f"\nMatched dataset: {len(matched_df)} rows ({len(matched_treated)} treated, {len(matched_control)} control)")
+matched_df = pd.concat([matched_treated, matched_control], ignore_index=True)
 
-# --- SMD After Matching ---
-smd_after = {}
+# --- SMD after matching ---
+mt = matched_df[matched_df["AI_ADOPTED"] == 1]
+mc = matched_df[matched_df["AI_ADOPTED"] == 0]
+
+print("\n--- SMD After Matching ---")
 for cov in covariates:
-      t_vals = matched_df.loc[matched_df['AI_ADOPTED'] == 1, cov]
-    c_vals = matched_df.loc[matched_df['AI_ADOPTED'] == 0, cov]
-    smd_after[cov] = compute_smd(t_vals, c_vals)
+    smd = compute_smd(mt[cov], mc[cov])
+    print(f"  {cov}: SMD = {smd:.4f}")
 
-print("\nSMD After Matching:")
-for k, v in smd_after.items():
-      print(f"  {k}: {v:.4f}")
-
-# --- SMD Balance Plot ---
-fig, ax = plt.subplots(figsize=(8, 5))
-y_pos = np.arange(len(covariates))
-before_vals = [smd_before[c] for c in covariates]
-after_vals = [smd_after[c] for c in covariates]
-ax.barh(y_pos - 0.2, [abs(v) for v in before_vals], 0.35, label='Before Matching', color='tomato', alpha=0.8)
-ax.barh(y_pos + 0.2, [abs(v) for v in after_vals], 0.35, label='After Matching', color='steelblue', alpha=0.8)
-ax.axvline(0.1, color='black', linestyle='--', linewidth=1, label='SMD = 0.1 Threshold')
-ax.set_yticks(y_pos)
-ax.set_yticklabels(covariates)
-ax.set_xlabel('|Standardized Mean Difference|', fontsize=12)
-ax.set_title('Covariate Balance: SMD Before and After PSM', fontsize=13)
-ax.legend()
-plt.tight_layout()
-plt.savefig('smd_balance.png', dpi=150)
-plt.close()
-print("SMD balance plot saved.")
-
-# --- PSM OLS Estimate ---
-X_psm = sm.add_constant(matched_df['AI_ADOPTED'])
-y_psm = matched_df['REV_GROWTH']
-psm_model = sm.OLS(y_psm, X_psm).fit()
-psm_coef = psm_model.params['AI_ADOPTED']
-print(f"\nPSM-Adjusted OLS coefficient on AI_ADOPTED: {psm_coef:.4f}")
+# --- PSM OLS regression on matched sample ---
+psm_model = smf.ols("REV_GROWTH ~ AI_ADOPTED", data=matched_df).fit()
+psm_coef = psm_model.params["AI_ADOPTED"]
+print(f"\n--- PSM OLS Coefficient for AI_ADOPTED: {psm_coef:.4f} ---")
 print(psm_model.summary())
 
-# --- Summary Table ---
-summary = pd.DataFrame({
-      'Model': ['Baseline OLS', 'PSM-Adjusted OLS'],
-      'AI_ADOPTED Coefficient': [round(baseline_coef, 4), round(psm_coef, 4)],
-      'N': [len(df_analysis), len(matched_df)]
-})
-print("\nSummary:")
-print(summary)
-summary.to_csv("results_summary.csv", index=False)
-
-# Save SMD table
-smd_table = pd.DataFrame({
-      'Covariate': covariates,
-      'SMD_Before': [round(smd_before[c], 4) for c in covariates],
-      'SMD_After': [round(smd_after[c], 4) for c in covariates]
-})
-smd_table.to_csv("smd_table.csv", index=False)
-
-print(f"\nBaseline OLS AI coefficient: {baseline_coef:.4f}")
-print(f"PSM-Adjusted AI coefficient: {psm_coef:.4f}")
-print("Analysis complete. Figures saved: common_support.png, smd_balance.png")
+print(f"\n=== Summary ===")
+print(f"  Baseline OLS Coefficient : {baseline_coef:.4f}")
+print(f"  PSM OLS Coefficient      : {psm_coef:.4f}")
+print(f"  Difference               : {baseline_coef - psm_coef:.4f}")
 
 
-# =============================================================================
-# PHASE 4 - INTERPRET
-# Prompt: "Summarize findings: how did the AI coefficient change post-PSM,
-# what does this say about selection bias, and assess common support and
-# balancing assumptions."
-# =============================================================================
+# ============================================================
+# PHASE 4: INTERPRET
+# See interpretation.tex for the written findings (~250 words)
+# addressing: coefficient shift, selection bias, common support,
+# and balancing assumption validity.
+# ============================================================
 
-print("""
-=== INTERPRETATION SUMMARY ===
-
-Baseline OLS vs PSM-Adjusted Coefficient:
-The naive OLS coefficient on AI_ADOPTED captures the raw association between
-AI adoption and revenue growth without accounting for systematic differences
-between adopters and non-adopters. After applying propensity score matching,
-the coefficient typically shrinks, indicating that some of the raw correlation
-was driven by selection bias rather than a true causal effect.
-
-Selection Bias:
-Firms that adopt AI tend to be larger, better-funded, and more digitally mature.
-This means the naive OLS overstates the causal benefit of AI adoption because
-adopters were already on a stronger growth trajectory. PSM controls for this
-by comparing AI adopters to observationally similar non-adopters.
-
-Common Support:
-If propensity score distributions overlap substantially between treated and
-control groups, the common support assumption holds, meaning we can find valid
-counterfactual matches for AI adopters.
-
-Balancing Property:
-SMD values below 0.1 after matching indicate well-balanced covariates,
-satisfying the balancing assumption required for valid PSM inference.
-""")
+print("\nAnalysis complete. See interpretation.tex for written findings.")
