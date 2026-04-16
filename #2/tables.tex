@@ -1,0 +1,28 @@
+% ── Balance Table ──────────────────────────────────
+\begin{table}[H]
+\caption{Pre-Treatment Balance Test (Welch's $t$-test)}
+\label{tab:balance}
+\begin{tabular}{lrrrr}
+\toprule
+Covariate & Treat Mean & Control Mean & t-stat & p-value \\
+\midrule
+YEARS\_EXPERIENCE & 4.640000 & 4.850000 & -0.598000 & 0.550600 \\
+TRAINING\_SCORE & 87.030000 & 87.910000 & -0.888000 & 0.376300 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+% ── ATE Results Table ──────────────────────────────
+\begin{table}[H]
+\caption{Average Treatment Effect Estimates}
+\label{tab:ate}
+\begin{tabular}{lrrrrrrl}
+\toprule
+Outcome & Treat Mean & Ctrl Mean & ATE & SE & t-stat & p-value & 95\% CI \\
+\midrule
+TASKS\_COMPLETED & 77.260000 & 72.180000 & 5.079000 & 1.817000 & 2.795000 & 0.006000 & [1.517, 8.64] \\
+ERROR\_RATE & 2.730000 & 2.340000 & 0.391000 & 0.151000 & 2.594000 & 0.010500 & [0.096, 0.687] \\
+\bottomrule
+\end{tabular}
+\end{table}
