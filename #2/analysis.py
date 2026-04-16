@@ -469,3 +469,4 @@ with open("tables.tex", "w") as f:
 print("[OUTPUT] Saved tables.tex")
 print("\n[DONE] All four phases complete. "
       "Outputs: boxplots.pdf, boxplots.png, tables.tex")
+# Scrape phase complete
