@@ -441,3 +441,4 @@ print("\n[OUTPUT] Saved tables.tex")
 print("[DONE] All four phases complete.")
 print("Outputs: trends.pdf, parallel_trends.pdf, tables.tex")
 # Scrape complete
+# Clean complete
