@@ -1,0 +1,41 @@
+% ── DiD Regression Table ───────────────────────────
+\begin{table}[H]
+\caption{Two-Way Fixed Effects DiD Regression Results}
+\label{tab:did}
+\begin{tabular}{lrrrrr}
+\toprule
+ & Coefficient & Std Error & p-value & 95% CI Lower & 95% CI Upper \\
+\midrule
+DID\_INTERACTION (Treated × Post) & 4000.370000 & 85.160000 & 0.000000 & 3829.140000 & 4171.610000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+% ── Placebo Test Table ─────────────────────────────
+\begin{table}[H]
+\caption{Placebo DiD Test (Fake Policy Year = 2020)}
+\label{tab:placebo}
+\begin{tabular}{rrrr}
+\toprule
+Fake Year & Coefficient & p-value & Result \\
+\midrule
+2020 & -3.250000 & 0.999300 & PASS \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+% ── Parallel Trends Slopes ─────────────────────────
+\begin{table}[H]
+\caption{Pre-Treatment Employment Slopes by Group}
+\label{tab:pt}
+\begin{tabular}{lrr}
+\toprule
+Group & Slope & p \\
+\midrule
+0 & -455.200000 & 0.742500 \\
+1 & -455.800000 & 0.642300 \\
+\bottomrule
+\end{tabular}
+\end{table}
