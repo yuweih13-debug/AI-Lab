@@ -1,0 +1,15 @@
+% ── Main Results Table ──────────────────────────────
+\begin{table}[H]
+\caption{IV and RDD Results Summary}
+\label{tab:results}
+\begin{tabular}{llllrl}
+\toprule
+Model & Outcome & Key Regressor & Coefficient & p-value & Note \\
+\midrule
+Naive OLS & Innovation Score & AI Intensity & 0.324500 & 0.000100 & Upward biased \\
+IV First Stage & AI Intensity & Distance (km) & -18.876900 & 0.000000 & F=53.1 \\
+IV 2SLS & Innovation Score & AI Intensity (IV) & 0.111900 & 0.403400 & CI [-0.154, 0.377] \\
+RDD & Innovation Score & Above Cutoff (85) & 8.945500 & 0.000000 & BW=10, N=68 \\
+\bottomrule
+\end{tabular}
+\end{table}
